@@ -8,7 +8,9 @@ import {
   type WhisperModelKey,
 } from "./whisper-models";
 
-const MODEL_HOST = "https://media.openreel.video/models/";
+// The OpenReel mirror omits the CORS headers required by Electron's renderer.
+// Hugging Face supports the same Transformers.js path contract.
+const MODEL_HOST = "https://huggingface.co/";
 
 env.allowLocalModels = false;
 env.allowRemoteModels = true;
