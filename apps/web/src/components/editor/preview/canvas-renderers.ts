@@ -1524,6 +1524,8 @@ const renderStaticSubtitle = (
   const color = style?.color || "#ffffff";
   const backgroundColor = style?.backgroundColor || "rgba(0, 0, 0, 0.7)";
   const position = style?.position || "bottom";
+  const outlineColor = style?.outlineColor;
+  const outlineWidth = style?.outlineWidth ?? 0;
 
   ctx.font = `bold ${fontSize}px "${fontFamily}"`;
   ctx.textAlign = "center";
@@ -1559,6 +1561,16 @@ const renderStaticSubtitle = (
       bgHeight,
     );
 
+    if (outlineColor && outlineWidth > 0) {
+      ctx.strokeStyle = outlineColor;
+      ctx.lineWidth = outlineWidth;
+      ctx.lineJoin = "round";
+      ctx.strokeText(line, canvasWidth / 2, y);
+    }
+    ctx.shadowColor = style?.shadowColor || "transparent";
+    ctx.shadowBlur = style?.shadowBlur ?? 0;
+    ctx.shadowOffsetX = style?.shadowOffsetX ?? 0;
+    ctx.shadowOffsetY = style?.shadowOffsetY ?? 0;
     ctx.fillStyle = color;
     ctx.fillText(line, canvasWidth / 2, y);
   }
@@ -1587,6 +1599,8 @@ const renderAnimatedSubtitle = (
   const baseColor = style?.color || "#ffffff";
   const backgroundColor = style?.backgroundColor || "rgba(0, 0, 0, 0.7)";
   const position = style?.position || "bottom";
+  const outlineColor = style?.outlineColor;
+  const outlineWidth = style?.outlineWidth ?? 0;
 
   ctx.font = `bold ${fontSize}px "${fontFamily}"`;
   ctx.textBaseline = "middle";
@@ -1637,6 +1651,16 @@ const renderAnimatedSubtitle = (
     );
     ctx.fillStyle = segmentColor;
     ctx.textAlign = "left";
+    if (outlineColor && outlineWidth > 0) {
+      ctx.strokeStyle = outlineColor;
+      ctx.lineWidth = outlineWidth;
+      ctx.lineJoin = "round";
+      ctx.strokeText(segment.text, xOffset, baseY + segment.offsetY);
+    }
+    ctx.shadowColor = style?.shadowColor || "transparent";
+    ctx.shadowBlur = style?.shadowBlur ?? 0;
+    ctx.shadowOffsetX = style?.shadowOffsetX ?? 0;
+    ctx.shadowOffsetY = style?.shadowOffsetY ?? 0;
     ctx.fillText(segment.text, xOffset, baseY + segment.offsetY);
 
     ctx.restore();

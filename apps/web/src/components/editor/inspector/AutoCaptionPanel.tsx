@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SUBTITLE_STYLE_PRESETS,
-  splitCaptionIntoSingleLineCues,
-  type TranscriptionSegment,
+  stickerLibrary,
+  type SubtitleWord,
 } from "@openreel/core";
 import {
   ToolcraftButton as Button,
@@ -21,7 +21,13 @@ import {
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { loadAudioBuffer } from "../../../utils/load-audio-buffer";
+import {
+  groupCaptionWords,
+  planSocialEmojis,
+  type SocialCaptionCue,
+} from "../../../utils/social-captions";
 import { audioBufferToWhisperSamples } from "../../../utils/whisper-audio";
+import { insertTimelineOverlay } from "../../../stores/project/insert-timeline-overlay";
 import {
   DEFAULT_WHISPER_MODEL,
   WHISPER_MODELS,
@@ -29,7 +35,14 @@ import {
   type WhisperModelKey,
 } from "../../../workers/whisper-models";
 
-const CAPTION_STYLE_PRESETS = ["default", "modern", "bold", "cinematic", "minimal"] as const;
+const CAPTION_STYLE_PRESETS = [
+  "default",
+  "modern",
+  "bold",
+  "social",
+  "cinematic",
+  "minimal",
+] as const;
 const WHISPER_LANGUAGES = [
   { code: "en", name: "English" },
   { code: "fr", name: "French" },
@@ -66,6 +79,7 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
   const getClip = useProjectStore((state) => state.getClip);
   const getMediaItem = useProjectStore((state) => state.getMediaItem);
   const addSubtitle = useProjectStore((state) => state.addSubtitle);
+  const createStickerClip = useProjectStore((state) => state.createStickerClip);
   const workerRef = useRef<Worker | null>(null);
   const [workerState, setWorkerState] = useState<WorkerState>("idle");
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -82,7 +96,7 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
   const [modelBackends, setModelBackends] = useState<
     Partial<Record<WhisperModelKey, "webgpu" | "wasm">>
   >({});
-  const [segments, setSegments] = useState<TranscriptionSegment[]>([]);
+  const [segments, setSegments] = useState<SocialCaptionCue[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const selectedItems = useUIStore((state) => state.selectedItems);
@@ -258,7 +272,7 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
       const sourceDuration = Math.max(0.1, sourceEnd - sourceStart);
       const playbackSpeed = Math.max(clip.speed ?? 1, 0.01);
       const clipEndTime = clip.startTime + clip.duration;
-      const nextSegments: TranscriptionSegment[] = (result.chunks ?? [])
+      const words: SubtitleWord[] = (result.chunks ?? [])
         .map((chunk) => {
           const start = Math.max(0, chunk.timestamp?.[0] ?? 0);
           const end = Math.min(
@@ -272,19 +286,16 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
               clipEndTime,
               clip.startTime + Math.max(start + 0.1, end) / playbackSpeed,
             ),
-            confidence: 1,
           };
         })
-        .filter(
-          (segment) =>
-            segment.text.length > 0 && segment.endTime > segment.startTime,
-        );
+        .filter((word) => word.text.length > 0 && word.endTime > word.startTime);
+      const nextSegments = groupCaptionWords(words, maxWordsPerLine);
       if (nextSegments.length === 0 && result.text?.trim()) {
         nextSegments.push({
           text: result.text.trim(),
           startTime: clip.startTime,
           endTime: clipEndTime,
-          confidence: 1,
+          words: [],
         });
       }
       if (nextSegments.length === 0) {
@@ -298,41 +309,78 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
       await audioContext?.close().catch(() => undefined);
       setIsTranscribing(false);
     }
-  }, [clip, mediaItem, runWorker, selectedModel, workerState]);
+  }, [clip, maxWordsPerLine, mediaItem, runWorker, selectedModel, workerState]);
 
   const handleAddToTimeline = useCallback(async () => {
     if (!clip || segments.length === 0) return;
     const style = SUBTITLE_STYLE_PRESETS[selectedStyle] ?? SUBTITLE_STYLE_PRESETS.default;
+    const isSocialStyle = selectedStyle === "social";
     let addedCount = 0;
     for (const segment of segments) {
-      const cues = splitCaptionIntoSingleLineCues(
-        segment.text,
-        segment.startTime,
-        segment.endTime,
-        maxWordsPerLine,
+      await addSubtitle(
+        {
+          id: `whisper-${crypto.randomUUID()}`,
+          text: isSocialStyle ? segment.text.toUpperCase() : segment.text,
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+          style,
+          words: segment.words.map((word) => ({
+            ...word,
+            text: isSocialStyle ? word.text.toUpperCase() : word.text,
+          })),
+        },
+        {
+          captionSource: "whisper",
+          captionSourceClipId: clip.id,
+          captionMaxWordsPerLine: maxWordsPerLine,
+          captionWhisperModel: selectedModel,
+        },
       );
-      for (const cue of cues) {
-        await addSubtitle(
-          {
-            id: `whisper-${crypto.randomUUID()}`,
-            text: cue.text,
-            startTime: cue.startTime,
-            endTime: cue.endTime,
-            style,
-          },
-          {
-            captionSource: "whisper",
-            captionSourceClipId: clip.id,
-            captionMaxWordsPerLine: maxWordsPerLine,
-            captionWhisperModel: selectedModel,
+      addedCount += 1;
+    }
+    let emojiCount = 0;
+    if (isSocialStyle) {
+      for (const emojiCue of planSocialEmojis(segments)) {
+        const created = await insertTimelineOverlay(
+          emojiCue.startTime,
+          emojiCue.duration,
+          (trackId) => {
+            const emojiClip = stickerLibrary.createEmojiClip(
+              {
+                id: `social-emoji-${crypto.randomUUID()}`,
+                emoji: emojiCue.emoji,
+                name: "Social caption emphasis",
+                category: "social-captions",
+              },
+              trackId,
+              emojiCue.startTime,
+              emojiCue.duration,
+            );
+            return createStickerClip({
+              ...emojiClip,
+              transform: {
+                ...emojiClip.transform,
+                position: { x: 0.5, y: 0.72 },
+                scale: { x: 0.28, y: 0.28 },
+              },
+              emphasisAnimation: {
+                type: "bounce",
+                speed: 1.5,
+                intensity: 0.8,
+                loop: false,
+                animationDuration: 0.45,
+              },
+            });
           },
         );
-        addedCount += 1;
+        if (created) emojiCount += 1;
       }
     }
     setSegments([]);
-    setProgressMessage(`${addedCount} single-line caption clips added`);
-  }, [addSubtitle, clip, maxWordsPerLine, segments, selectedModel, selectedStyle]);
+    setProgressMessage(
+      `${addedCount} caption clips added${emojiCount > 0 ? ` · ${emojiCount} emphasis emojis added` : ""}`,
+    );
+  }, [addSubtitle, clip, createStickerClip, maxWordsPerLine, segments, selectedModel, selectedStyle]);
 
   const modelStatus = useMemo(() => {
     const model = WHISPER_MODELS[selectedModel];
@@ -472,7 +520,7 @@ export const AutoCaptionPanel: React.FC<AutoCaptionPanelProps> = ({
             ))}
           </div>
           <Button
-            label={`Add ${segments.length} as Editable Text`}
+            label={`Add ${segments.length} captions to Timeline`}
             variant="primary"
             size="sm"
             onClick={handleAddToTimeline}

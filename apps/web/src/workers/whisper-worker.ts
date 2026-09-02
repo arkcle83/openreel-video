@@ -138,7 +138,7 @@ self.onmessage = async (
     const output = await transcriber(audio, {
       language,
       task: "transcribe",
-      return_timestamps: true,
+      return_timestamps: "word",
       chunk_length_s: 30,
       stride_length_s: 5,
     });

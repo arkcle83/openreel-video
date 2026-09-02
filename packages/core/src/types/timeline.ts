@@ -313,6 +313,12 @@ export interface SubtitleStyle {
   readonly position: "top" | "center" | "bottom";
   readonly highlightColor?: string;
   readonly upcomingColor?: string;
+  readonly outlineColor?: string;
+  readonly outlineWidth?: number;
+  readonly shadowColor?: string;
+  readonly shadowBlur?: number;
+  readonly shadowOffsetX?: number;
+  readonly shadowOffsetY?: number;
 }
 
 export interface AutomationPoint {
